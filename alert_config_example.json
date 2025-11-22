@@ -1,0 +1,24 @@
+{
+  "email": {
+    "enabled": false,
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "sender_email": "your-email@gmail.com",
+    "sender_password": "your-app-password",
+    "recipients": [
+      "recipient@example.com"
+    ]
+  },
+  "webhook": {
+    "enabled": false,
+    "slack_url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+    "discord_url": "https://discord.com/api/webhooks/YOUR/DISCORD/WEBHOOK"
+  },
+  "alert_rules": {
+    "price_drop_threshold": 10.0,
+    "absolute_drop_threshold": 50.0,
+    "monitor_days": 30,
+    "max_alerts_per_hour": 10,
+    "include_wishlist_only": false
+  }
+}
