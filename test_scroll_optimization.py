@@ -120,11 +120,11 @@ class Product:
 
 
 class ZeptoPriceTrackerWithComparison:
-    def __init__(self, location_pin: str = "560066", price_drop_threshold: float = 20.0):
+    def __init__(self, location_pin: str = "Arcade Gloria", price_drop_threshold: float = 20.0):
         self.location_pin = location_pin
         self.price_drop_threshold = abs(price_drop_threshold)
         self.base_url = "https://www.zepto.com"
-        self.db_path = Path("data/zepto_prices.db")
+        self.db_path = Path("data/zepto_prices_Arcade_Gloria.db")
         self.db_path.parent.mkdir(exist_ok=True)
         self.init_database()
         
@@ -246,18 +246,13 @@ class ZeptoPriceTrackerWithComparison:
         
         return result
     
-    async def scrape_all_categories(self, categories_file: str = 'categories.json'):
+    async def scrape_all_categories(self):
         """Scrape all categories with price comparison"""
-        # Load categories from external JSON file
-        try:
-            with open(categories_file, 'r') as f:
-                categories = json.load(f)
-        except FileNotFoundError:
-            print("❌ categories.json not found. Please create the file.")
-            return []
-        except json.JSONDecodeError:
-            print("❌ Error parsing categories.json. Please check the format.")
-            return []
+        # Hardcoded category for testing
+        categories = [
+            {"name": "Fruits & Vegetables", "url": "https://www.zepto.com/cn/fruits-vegetables/fruits-vegetables/cid/64374cfe-d06f-4a01-898e-c07c46462c36/scid/e78a8422-5f20-4e4b-9a9f-22a0e53962e3"}
+        ]
+        print(f"🧪 Testing with single category: {categories[0]['name']}")
         
         # Create necessary directories
         Path("data").mkdir(exist_ok=True)
@@ -444,21 +439,21 @@ class ZeptoPriceTrackerWithComparison:
             pass
     
     async def _wait_for_products(self, page):
-        """Wait and scroll for products to load - simple bottom scrolling"""
-        print("    🔄 Waiting for products to load...")
+        """Wait and scroll for products to load - Infinite Scroll Implementation"""
+        print("    🔄 Starting infinite scroll...")
         
-        # Initial wait for first load
+        # Initial wait
         await asyncio.sleep(3)
         
-        # Get initial count
         prev_count = 0
         stable_rounds = 0
+        max_scrolls = 100  # High limit for testing
         price_elements = page.locator('text=/₹[0-9]/')
+        
         current_count = await price_elements.count()
         print(f"    📦 Initial products: {current_count}")
         
-        # Scroll to bottom 5 times with waits
-        for scroll_num in range(9):
+        for scroll_num in range(max_scrolls):
             # Scroll to bottom
             await page.evaluate("window.scrollBy(0, Math.floor(window.innerHeight * 0.9));")
             await asyncio.sleep(1.5)  # Wait for content to load
@@ -472,9 +467,12 @@ class ZeptoPriceTrackerWithComparison:
                 stable_rounds = 0
             else:
                 stable_rounds += 1
-                print(f"    ⏳ No new products (stable rounds: {stable_rounds})")
-            if stable_rounds >= 3:
-                break            
+                # print(f"    ⏳ No new products (stable rounds: {stable_rounds})")
+            
+            # Exit if stable for too long
+            if stable_rounds >= 5:
+                print(f"    🛑 Product count stable for {stable_rounds} rounds. Stopping.")
+                break
         
         # Final count
         final_count = await price_elements.count()
@@ -680,6 +678,8 @@ class ZeptoPriceTrackerWithComparison:
         seen = set()
         unique = []
         
+        print(f"    🔍 Checking for duplicates among {len(products)} extracted items...")
+        
         for prod in products:
             # Normalize name by removing extra spaces
             normalized_name = ' '.join(prod.name.split()).lower()
@@ -687,6 +687,9 @@ class ZeptoPriceTrackerWithComparison:
             if normalized_name not in seen:
                 seen.add(normalized_name)
                 unique.append(prod)
+            else:
+                # Log the duplicate for verification
+                print(f"      ⚠️  Duplicate found (skipping): {prod.name[:50]}...")
         
         return unique
 
@@ -696,10 +699,8 @@ async def main():
     parser = argparse.ArgumentParser(description='Zepto Price Tracker with Price Comparison')
     parser.add_argument('--threshold', type=float, default=20.0,
                         help='Price drop threshold percentage (default: 20.0)')
-    parser.add_argument('--location', type=str, default='560066',
-                        help='Location PIN code (default: 560066)')
-    parser.add_argument('--categories', type=str, default='categories.json',
-                        help='Path to categories JSON file (default: categories.json)')
+    parser.add_argument('--location', type=str, default='Arcade Gloria',
+                        help='Location PIN code (default: Arcade Gloria)')
     
     args = parser.parse_args()
     
@@ -709,7 +710,7 @@ async def main():
         price_drop_threshold=args.threshold
     )
     
-    await tracker.scrape_all_categories(categories_file=args.categories)
+    await tracker.scrape_all_categories()
 
 
 if __name__ == "__main__":
