@@ -43,14 +43,79 @@ class Product:
     image: str
     rating: float = 0.0
     extracted_at: datetime = None
+    product_id: str = None  # Zepto product ID from URL
     
     def __post_init__(self):
         if self.extracted_at is None:
             self.extracted_at = datetime.now()
     
+    def extract_zepto_id(self) -> str:
+        """Extract unique product ID from Zepto URL (similar to Amazon's ASIN)"""
+        if not self.url:
+            return None
+        
+        import re
+        # Try to extract from different URL patterns
+        patterns = [
+            r'/p/([^/?]+)',  # /p/product-id format
+            r'/product/([^/?]+)',  # /product/product-id format
+            r'/cn/[^/]+/[^/]+/cid/[^/]+/scid/([^/?]+)',  # /cn/category/subcategory/cid/xxx/scid/product-id
+            r'id=([^&]+)',  # ?id=product-id query parameter
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, self.url)
+            if match:
+                return match.group(1)
+        
+        # If no ID found, use hash of URL as fallback
+        return hashlib.md5(self.url.encode()).hexdigest()[:16]
+    
     def get_hash(self) -> str:
-        """Generate unique hash for product based on name and category"""
-        content = f"{self.name.lower()}|{self.category.lower()}"
+        """Generate unique hash using product ID as primary identifier"""
+        # First try to extract product ID from URL (most reliable)
+        product_id = self.extract_zepto_id()
+        
+        if product_id:
+            return product_id
+        
+        # Fallback to name-based hash if no URL/ID
+        name_lower = self.name.lower()
+        
+        # Extract size information
+        import re
+        size_pattern = r'(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|pcs|pc|pack|units|unit))'
+        size_match = re.search(size_pattern, name_lower)
+        size_info = size_match.group(1) if size_match else ""
+        
+        # Extract key differentiators to distinguish similar products
+        feature_patterns = [
+            r'(dandruff|anti-dandruff|dandruff-care)',
+            r'(hair.fall|hair-fall|hairfall)',
+            r'(damage.care|damage-repair)',
+            r'(smooth|silk|shine|smoothening)',
+            r'(volume|volumizing|thick)',
+            r'(color|colored|colour)',
+            r'(men|male|gentleman)',
+            r'(kids|children|baby)',
+            r'(herbal|natural|organic)',
+            r'(oily|dry|normal)',
+            r'(daily|regular|classic)',
+            r'(intensive|strong|extra)',
+            r'(clinical|medicated)',
+        ]
+        
+        features = []
+        for pattern in feature_patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                features.append(match.group(1))
+        
+        # Sort features to maintain consistent order
+        feature_info = '|'.join(sorted(features)) if features else ""
+        
+        # Create unique hash with all differentiators
+        content = f"{name_lower}|{self.category.lower()}|{size_info}|{feature_info}"
         return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
@@ -72,6 +137,7 @@ class ZeptoPriceTrackerWithComparison:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS products (
                     product_hash TEXT PRIMARY KEY,
+                    product_id TEXT,
                     name TEXT NOT NULL,
                     price REAL,
                     mrp REAL,
@@ -84,6 +150,12 @@ class ZeptoPriceTrackerWithComparison:
                     location TEXT
                 )
             ''')
+            
+            # Migration: Add product_id column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE products ADD COLUMN product_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column likely already exists
             
             # Price history table for tracking all price changes
             cursor.execute('''
@@ -123,6 +195,7 @@ class ZeptoPriceTrackerWithComparison:
             'old_price': None,
             'price_diff': 0,
             'pct_change': 0,
+            'url': product.url,
             'is_new': existing is None
         }
         
@@ -135,13 +208,16 @@ class ZeptoPriceTrackerWithComparison:
                 result['pct_change'] = pct_change
         
         # Upsert product
+        product_id = product.extract_zepto_id()
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO products 
-                (product_hash, name, price, mrp, discount, category, url, image, rating, extracted_at, location)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (product_hash, product_id, name, price, mrp, discount, category, url, image, rating, extracted_at, location)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(product_hash) DO UPDATE SET
+                    product_id=excluded.product_id,
                     name=excluded.name,
                     price=excluded.price,
                     mrp=excluded.mrp,
@@ -153,7 +229,7 @@ class ZeptoPriceTrackerWithComparison:
                     extracted_at=excluded.extracted_at,
                     location=excluded.location
             ''', (
-                product_hash, product.name, product.price, product.mrp, product.discount,
+                product_hash, product_id, product.name, product.price, product.mrp, product.discount,
                 product.category, product.url, product.image, product.rating,
                 product.extracted_at.isoformat(), self.location_pin
             ))
@@ -269,22 +345,22 @@ class ZeptoPriceTrackerWithComparison:
         print(f"🔄 Products updated: {len([u for u in product_updates if not u['is_new']])}")
         print(f"🗄️  Database: {self.db_path}")
         
-        # Export to JSON
-        if all_products:
-            export_data = []
-            for prod in all_products:
-                export_data.append({
-                    'name': prod.name,
-                    'price': prod.price,
-                    'category': prod.category,
-                    'image_url': prod.image[:100] + '...' if prod.image and len(prod.image) > 100 else prod.image,
-                    'extracted_at': prod.extracted_at.isoformat()
-                })
-            
-            with open('exports/zepto_products.json', 'w') as f:
-                json.dump(export_data, f, indent=2)
-            
-            print(f"📄 Exported to exports/zepto_products.json")
+        # Export to JSON - DISABLED per user request
+        # if all_products:
+        #     export_data = []
+        #     for prod in all_products:
+        #         export_data.append({
+        #             'name': prod.name,
+        #             'price': prod.price,
+        #             'category': prod.category,
+        #             'image_url': prod.image[:100] + '...' if prod.image and len(prod.image) > 100 else prod.image,
+        #             'extracted_at': prod.extracted_at.isoformat()
+        #         })
+        #     
+        #     with open('exports/zepto_products.json', 'w') as f:
+        #         json.dump(export_data, f, indent=2)
+        #     
+        #     print(f"📄 Exported to exports/zepto_products.json")
         
         # Report major price drops
         self._report_price_drops(major_drops)
@@ -336,12 +412,25 @@ class ZeptoPriceTrackerWithComparison:
                     arrow = "↑"
                     color = Color.GREEN
                 
+                # Get additional product info from database
+                product_info = self.get_product_by_hash(drop['hash'])
+                category = product_info['category'] if product_info else "Unknown"
+                
+                # Display full product name without truncation
                 print(ctext(
-                    f"{arrow} {drop['name'][:60]}... | "
+                    f"{arrow} {drop['name']} | "
                     f"₹{old_price:.2f} → ₹{new_price:.2f} "
                     f"({change:+.1f}%)",
                     color + Color.BOLD
                 ))
+                
+                # Additional details
+                print(ctext(f"    📁 Category: {category}", Color.BLUE))
+                if drop.get('url'):
+                    print(ctext(f"    🔗 Link: {drop['url']}", Color.CYAN))
+                
+                # Add separator between products
+                print()
     
     async def _set_location(self, page):
         """Set delivery location"""
@@ -439,6 +528,7 @@ class ZeptoPriceTrackerWithComparison:
             'no_image': 0,
             'invalid_name': 0,
             'no_price': 0,
+            'no_url': 0,
             'extracted': 0
         }
         
@@ -466,6 +556,32 @@ class ZeptoPriceTrackerWithComparison:
                 if not name or len(name) < 5 or any(skip in name.lower() for skip in ['new launches', 'view all', 'shop now', 'advert']):
                     stats['invalid_name'] += 1
                     continue
+                
+                # Skip generic category names that aren't actual products
+                if name.strip().lower() in ['top picks', 'top deals', 'shampoos', 'facewash', 'soaps', 'shower gels', 'toothpaste', 'conditioner', 'oils']:
+                    stats['invalid_name'] += 1
+                    continue
+                
+                # Extract size/quantity information to ensure uniqueness
+                # Look for patterns like "1 L", "500 ml", "1 pc", etc. in the container text
+                container_text = container.get_text(" ", strip=True)
+                size_pattern = r'(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|pcs|pc|pack|units|unit)\b)'
+                
+                # Find all size matches in the container text
+                size_matches = re.findall(size_pattern, container_text, re.IGNORECASE)
+                
+                if size_matches:
+                    found_sizes = []
+                    for size in size_matches:
+                        # Normalize size string for comparison
+                        size = ' '.join(size.split())
+                        if size.lower() not in name.lower() and size.lower() not in [s.lower() for s in found_sizes]:
+                            found_sizes.append(size)
+                    
+                    if found_sizes:
+                        # Append all found sizes to ensure uniqueness
+                        suffix = " (" + ", ".join(found_sizes) + ")"
+                        name = f"{name}{suffix}"
                 
                 # Get price - multiple patterns
                 price = None
@@ -498,16 +614,38 @@ class ZeptoPriceTrackerWithComparison:
                     stats['no_price'] += 1
                     continue
                 
-                # Get product URL
+                # Get product URL (must be actual product link, not category link)
                 link = container.find('a')
+                # If no link found inside, check if the container itself is wrapped in a link
+                if not link:
+                    link = container.find_parent('a')
+                
                 url = ""
                 if link and link.get('href'):
-                    url = link['href']
-                    if url.startswith('/'):
-                        url = self.base_url + url
-                
+                    href = link['href'].strip()
+                    
+                    # Debug: Print a few URLs to understand the pattern
+                    if len(products) < 3:
+                        print(f"    🔍 DEBUG URL: {href}")
+                    
+                    # Skip category/section links - only keep product-specific links
+                    # Category links usually contain '/cid/' or '/scid/' without product-specific paths
+                    # Whitelist /pn/ (Product Name) and /pvid/ (Product Variant ID)
+                    if any(skip in href for skip in ['/cid/', '/scid/']) and not any(product in href for product in ['/p/', '/product/', '?id=', '/pn/', '/pvid/']):
+                        # This is likely a category link, skip it
+                        url = ""
+                    elif href.startswith('/'):
+                        url = self.base_url.rstrip('/') + href
+                    else:
+                        url = href
                 # Get image URL
                 image_url = img.get('src', '') if img else ''
+                
+                # TEMPORARILY DISABLED: Zepto might not have individual product pages
+                # Skip products without individual URLs (likely category/section items)
+                # if not url:
+                #     stats['no_url'] += 1
+                #     continue
                 
                 # Create product
                 product = Product(
@@ -532,6 +670,7 @@ class ZeptoPriceTrackerWithComparison:
         print(f"       • No image: {stats['no_image']}")
         print(f"       • Invalid name: {stats['invalid_name']}")
         print(f"       • No price: {stats['no_price']}")
+        print(f"       • No individual URL (skipped): {stats['no_url']}")
         print(f"       • Successfully extracted: {stats['extracted']}")
         
         return products
@@ -557,8 +696,8 @@ async def main():
     parser = argparse.ArgumentParser(description='Zepto Price Tracker with Price Comparison')
     parser.add_argument('--threshold', type=float, default=20.0,
                         help='Price drop threshold percentage (default: 20.0)')
-    parser.add_argument('--location', type=str, default='560001',
-                        help='Location PIN code (default: 560001)')
+    parser.add_argument('--location', type=str, default='560066',
+                        help='Location PIN code (default: 560066)')
     
     args = parser.parse_args()
     
