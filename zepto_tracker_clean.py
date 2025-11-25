@@ -137,6 +137,7 @@ class ZeptoPriceTrackerWithComparison:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS products (
                     product_hash TEXT PRIMARY KEY,
+                    product_id TEXT,
                     name TEXT NOT NULL,
                     price REAL,
                     mrp REAL,
@@ -149,6 +150,12 @@ class ZeptoPriceTrackerWithComparison:
                     location TEXT
                 )
             ''')
+            
+            # Migration: Add product_id column if it doesn't exist
+            try:
+                cursor.execute("ALTER TABLE products ADD COLUMN product_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column likely already exists
             
             # Price history table for tracking all price changes
             cursor.execute('''
@@ -201,13 +208,16 @@ class ZeptoPriceTrackerWithComparison:
                 result['pct_change'] = pct_change
         
         # Upsert product
+        product_id = product.extract_zepto_id()
+        
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO products 
-                (product_hash, name, price, mrp, discount, category, url, image, rating, extracted_at, location)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (product_hash, product_id, name, price, mrp, discount, category, url, image, rating, extracted_at, location)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(product_hash) DO UPDATE SET
+                    product_id=excluded.product_id,
                     name=excluded.name,
                     price=excluded.price,
                     mrp=excluded.mrp,
@@ -219,7 +229,7 @@ class ZeptoPriceTrackerWithComparison:
                     extracted_at=excluded.extracted_at,
                     location=excluded.location
             ''', (
-                product_hash, product.name, product.price, product.mrp, product.discount,
+                product_hash, product_id, product.name, product.price, product.mrp, product.discount,
                 product.category, product.url, product.image, product.rating,
                 product.extracted_at.isoformat(), self.location_pin
             ))
@@ -335,22 +345,22 @@ class ZeptoPriceTrackerWithComparison:
         print(f"🔄 Products updated: {len([u for u in product_updates if not u['is_new']])}")
         print(f"🗄️  Database: {self.db_path}")
         
-        # Export to JSON
-        if all_products:
-            export_data = []
-            for prod in all_products:
-                export_data.append({
-                    'name': prod.name,
-                    'price': prod.price,
-                    'category': prod.category,
-                    'image_url': prod.image[:100] + '...' if prod.image and len(prod.image) > 100 else prod.image,
-                    'extracted_at': prod.extracted_at.isoformat()
-                })
-            
-            with open('exports/zepto_products.json', 'w') as f:
-                json.dump(export_data, f, indent=2)
-            
-            print(f"📄 Exported to exports/zepto_products.json")
+        # Export to JSON - DISABLED per user request
+        # if all_products:
+        #     export_data = []
+        #     for prod in all_products:
+        #         export_data.append({
+        #             'name': prod.name,
+        #             'price': prod.price,
+        #             'category': prod.category,
+        #             'image_url': prod.image[:100] + '...' if prod.image and len(prod.image) > 100 else prod.image,
+        #             'extracted_at': prod.extracted_at.isoformat()
+        #         })
+        #     
+        #     with open('exports/zepto_products.json', 'w') as f:
+        #         json.dump(export_data, f, indent=2)
+        #     
+        #     print(f"📄 Exported to exports/zepto_products.json")
         
         # Report major price drops
         self._report_price_drops(major_drops)
@@ -552,6 +562,27 @@ class ZeptoPriceTrackerWithComparison:
                     stats['invalid_name'] += 1
                     continue
                 
+                # Extract size/quantity information to ensure uniqueness
+                # Look for patterns like "1 L", "500 ml", "1 pc", etc. in the container text
+                container_text = container.get_text(" ", strip=True)
+                size_pattern = r'(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|pcs|pc|pack|units|unit)\b)'
+                
+                # Find all size matches in the container text
+                size_matches = re.findall(size_pattern, container_text, re.IGNORECASE)
+                
+                if size_matches:
+                    found_sizes = []
+                    for size in size_matches:
+                        # Normalize size string for comparison
+                        size = ' '.join(size.split())
+                        if size.lower() not in name.lower() and size.lower() not in [s.lower() for s in found_sizes]:
+                            found_sizes.append(size)
+                    
+                    if found_sizes:
+                        # Append all found sizes to ensure uniqueness
+                        suffix = " (" + ", ".join(found_sizes) + ")"
+                        name = f"{name}{suffix}"
+                
                 # Get price - multiple patterns
                 price = None
                 
@@ -585,6 +616,10 @@ class ZeptoPriceTrackerWithComparison:
                 
                 # Get product URL (must be actual product link, not category link)
                 link = container.find('a')
+                # If no link found inside, check if the container itself is wrapped in a link
+                if not link:
+                    link = container.find_parent('a')
+                
                 url = ""
                 if link and link.get('href'):
                     href = link['href'].strip()
@@ -595,7 +630,8 @@ class ZeptoPriceTrackerWithComparison:
                     
                     # Skip category/section links - only keep product-specific links
                     # Category links usually contain '/cid/' or '/scid/' without product-specific paths
-                    if any(skip in href for skip in ['/cid/', '/scid/']) and not any(product in href for product in ['/p/', '/product/', '?id=']):
+                    # Whitelist /pn/ (Product Name) and /pvid/ (Product Variant ID)
+                    if any(skip in href for skip in ['/cid/', '/scid/']) and not any(product in href for product in ['/p/', '/product/', '?id=', '/pn/', '/pvid/']):
                         # This is likely a category link, skip it
                         url = ""
                     elif href.startswith('/'):

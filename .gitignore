@@ -43,10 +43,6 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Exports and data
-exports/*.json
+# Data directories
+exports/
 data/
-
-# Config files with sensitive data
-alert_config.json

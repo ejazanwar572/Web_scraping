@@ -43,79 +43,14 @@ class Product:
     image: str
     rating: float = 0.0
     extracted_at: datetime = None
-    product_id: str = None  # Zepto product ID from URL
     
     def __post_init__(self):
         if self.extracted_at is None:
             self.extracted_at = datetime.now()
     
-    def extract_zepto_id(self) -> str:
-        """Extract unique product ID from Zepto URL (similar to Amazon's ASIN)"""
-        if not self.url:
-            return None
-        
-        import re
-        # Try to extract from different URL patterns
-        patterns = [
-            r'/p/([^/?]+)',  # /p/product-id format
-            r'/product/([^/?]+)',  # /product/product-id format
-            r'/cn/[^/]+/[^/]+/cid/[^/]+/scid/([^/?]+)',  # /cn/category/subcategory/cid/xxx/scid/product-id
-            r'id=([^&]+)',  # ?id=product-id query parameter
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, self.url)
-            if match:
-                return match.group(1)
-        
-        # If no ID found, use hash of URL as fallback
-        return hashlib.md5(self.url.encode()).hexdigest()[:16]
-    
     def get_hash(self) -> str:
-        """Generate unique hash using product ID as primary identifier"""
-        # First try to extract product ID from URL (most reliable)
-        product_id = self.extract_zepto_id()
-        
-        if product_id:
-            return product_id
-        
-        # Fallback to name-based hash if no URL/ID
-        name_lower = self.name.lower()
-        
-        # Extract size information
-        import re
-        size_pattern = r'(\d+(?:\.\d+)?\s*(?:g|kg|ml|l|pcs|pc|pack|units|unit))'
-        size_match = re.search(size_pattern, name_lower)
-        size_info = size_match.group(1) if size_match else ""
-        
-        # Extract key differentiators to distinguish similar products
-        feature_patterns = [
-            r'(dandruff|anti-dandruff|dandruff-care)',
-            r'(hair.fall|hair-fall|hairfall)',
-            r'(damage.care|damage-repair)',
-            r'(smooth|silk|shine|smoothening)',
-            r'(volume|volumizing|thick)',
-            r'(color|colored|colour)',
-            r'(men|male|gentleman)',
-            r'(kids|children|baby)',
-            r'(herbal|natural|organic)',
-            r'(oily|dry|normal)',
-            r'(daily|regular|classic)',
-            r'(intensive|strong|extra)',
-            r'(clinical|medicated)',
-        ]
-        
-        features = []
-        for pattern in feature_patterns:
-            match = re.search(pattern, name_lower)
-            if match:
-                features.append(match.group(1))
-        
-        # Sort features to maintain consistent order
-        feature_info = '|'.join(sorted(features)) if features else ""
-        
-        # Create unique hash with all differentiators
-        content = f"{name_lower}|{self.category.lower()}|{size_info}|{feature_info}"
+        """Generate unique hash for product based on name and category"""
+        content = f"{self.name.lower()}|{self.category.lower()}"
         return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
@@ -188,7 +123,6 @@ class ZeptoPriceTrackerWithComparison:
             'old_price': None,
             'price_diff': 0,
             'pct_change': 0,
-            'url': product.url,
             'is_new': existing is None
         }
         
@@ -402,25 +336,12 @@ class ZeptoPriceTrackerWithComparison:
                     arrow = "↑"
                     color = Color.GREEN
                 
-                # Get additional product info from database
-                product_info = self.get_product_by_hash(drop['hash'])
-                category = product_info['category'] if product_info else "Unknown"
-                
-                # Display full product name without truncation
                 print(ctext(
-                    f"{arrow} {drop['name']} | "
+                    f"{arrow} {drop['name'][:60]}... | "
                     f"₹{old_price:.2f} → ₹{new_price:.2f} "
                     f"({change:+.1f}%)",
                     color + Color.BOLD
                 ))
-                
-                # Additional details
-                print(ctext(f"    📁 Category: {category}", Color.BLUE))
-                if drop.get('url'):
-                    print(ctext(f"    🔗 Link: {drop['url']}", Color.CYAN))
-                
-                # Add separator between products
-                print()
     
     async def _set_location(self, page):
         """Set delivery location"""
@@ -518,7 +439,6 @@ class ZeptoPriceTrackerWithComparison:
             'no_image': 0,
             'invalid_name': 0,
             'no_price': 0,
-            'no_url': 0,
             'extracted': 0
         }
         
@@ -544,11 +464,6 @@ class ZeptoPriceTrackerWithComparison:
                         name = name_elem.get_text().strip()
                 
                 if not name or len(name) < 5 or any(skip in name.lower() for skip in ['new launches', 'view all', 'shop now', 'advert']):
-                    stats['invalid_name'] += 1
-                    continue
-                
-                # Skip generic category names that aren't actual products
-                if name.strip().lower() in ['top picks', 'top deals', 'shampoos', 'facewash', 'soaps', 'shower gels', 'toothpaste', 'conditioner', 'oils']:
                     stats['invalid_name'] += 1
                     continue
                 
@@ -583,33 +498,16 @@ class ZeptoPriceTrackerWithComparison:
                     stats['no_price'] += 1
                     continue
                 
-                # Get product URL (must be actual product link, not category link)
+                # Get product URL
                 link = container.find('a')
                 url = ""
                 if link and link.get('href'):
-                    href = link['href'].strip()
-                    
-                    # Debug: Print a few URLs to understand the pattern
-                    if len(products) < 3:
-                        print(f"    🔍 DEBUG URL: {href}")
-                    
-                    # Skip category/section links - only keep product-specific links
-                    # Category links usually contain '/cid/' or '/scid/' without product-specific paths
-                    if any(skip in href for skip in ['/cid/', '/scid/']) and not any(product in href for product in ['/p/', '/product/', '?id=']):
-                        # This is likely a category link, skip it
-                        url = ""
-                    elif href.startswith('/'):
-                        url = self.base_url.rstrip('/') + href
-                    else:
-                        url = href
+                    url = link['href']
+                    if url.startswith('/'):
+                        url = self.base_url + url
+                
                 # Get image URL
                 image_url = img.get('src', '') if img else ''
-                
-                # TEMPORARILY DISABLED: Zepto might not have individual product pages
-                # Skip products without individual URLs (likely category/section items)
-                # if not url:
-                #     stats['no_url'] += 1
-                #     continue
                 
                 # Create product
                 product = Product(
@@ -634,7 +532,6 @@ class ZeptoPriceTrackerWithComparison:
         print(f"       • No image: {stats['no_image']}")
         print(f"       • Invalid name: {stats['invalid_name']}")
         print(f"       • No price: {stats['no_price']}")
-        print(f"       • No individual URL (skipped): {stats['no_url']}")
         print(f"       • Successfully extracted: {stats['extracted']}")
         
         return products
@@ -660,8 +557,8 @@ async def main():
     parser = argparse.ArgumentParser(description='Zepto Price Tracker with Price Comparison')
     parser.add_argument('--threshold', type=float, default=20.0,
                         help='Price drop threshold percentage (default: 20.0)')
-    parser.add_argument('--location', type=str, default='560066',
-                        help='Location PIN code (default: 560066)')
+    parser.add_argument('--location', type=str, default='560001',
+                        help='Location PIN code (default: 560001)')
     
     args = parser.parse_args()
     
