@@ -1,0 +1,54 @@
+Md Ejaz Anwar
+anwar.ejaz181@gmail.com|9024293714| Linkedin 
+Skills
+Education
+Professional Summary
+BITS Pilani
+2014-18
+08/21- 07/22
+Uber
+Hyderabad
+07/18- 07/21
+Aditya Birla 
+Bangalore
+B.Tech - Chemical Engineering 
+SQL, Python, PySpark, R, ETL, Advanced Statistical Analysis, Machine Learning, Predictive Modelling,
+A/B Testing, BigQuery, AWS, GCP, Databricks, Airflow, Tableau, PowerBI, Looker, Google Data Studio,
+JIRA, Advanced Excel, Git, Google Analytics, Adobe Analytics, CleverTap, AI/ML
+Results-driven Product Analyst with 6 years of experience in leveraging data to drive product strategy, feature
+optimization, and user experience improvements. Skilled in SQL, Excel, Tableau, and A/B testing with a
+strong focus on user behavior analytics and KPIs.Proven track record of cross-functional collaboration with
+product, engineering, and business teams to deliver data-backed decisions and measurable growth.
+Work Experience
+Certifications Google Data Analytics Certificate- Coursera
+Reduced Zero Result Pages (ZRP) by 40% through data-driven A/B testing, significantly
+improving user experience and search engagement. Led the development and launch
+of a car comparison feature, driving a 10% increase in lead generation and supporting
+product growth initiatives.
+Supported production and operations teams by analyzing yield, process efficiency,
+and inventory data to identify bottlenecks and recommend cost-saving improvements.
+Delivered data-driven insights by partnering with stakeholders, and automated 35+
+BAU reports, saving 5+ hours of manual effort weekly. Built a dynamic U4B dashboard
+from scratch using Power BI, Google Sheets, and Python (Pandas, NumPy) for
+automated daily data updates.
+Partnered with Product, Engineering, and Strategy teams to define goals, design A/B
+tests, forecast trends, and monitor performance metrics—directly influencing product
+roadmaps and investment priorities.
+Developed scalable Tableau dashboards for PayPal Shopping, delivering real-time
+visibility into 50+ KPIs for 100+ stakeholders, enabling faster and more informed
+product decisions. 
+Mentored 2 junior analysts on SQL/Python best practices and A/B test design.
+•
+07/22- 03/23
+OLX Autos
+Gurgaon
+ Analyst
+Product Analyst
+Business Analyst
+Senior Product Analyst04/23- Present 
+PayPal 
+Bangalore
+•
+•
+•
+•

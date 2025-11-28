@@ -5,13 +5,15 @@ Tracks price changes between runs and reports significant drops
 """
 import asyncio
 import sys
-import argparse
+import os
+
 from pathlib import Path
 from datetime import datetime
 import sqlite3
 import json
 import re
 import hashlib
+import requests
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Tuple
 
@@ -120,11 +122,12 @@ class Product:
 
 
 class ZeptoPriceTrackerWithComparison:
-    def __init__(self, location_pin: str = "Arcade Gloria", price_drop_threshold: float = 20.0):
+    def __init__(self, location_pin: str = "Arcade Gloria", price_drop_threshold: float = 30.0):
         self.location_pin = location_pin
         self.price_drop_threshold = abs(price_drop_threshold)
         self.base_url = "https://www.zepto.com"
-        self.db_path = Path("data/zepto_prices_Arcade_Gloria.db")
+        self.slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+        self.db_path = Path("data/zepto_prices_test.db")
         self.db_path.parent.mkdir(exist_ok=True)
         self.init_database()
         
@@ -248,11 +251,16 @@ class ZeptoPriceTrackerWithComparison:
     
     async def scrape_all_categories(self):
         """Scrape all categories with price comparison"""
-        # Hardcoded category for testing
-        categories = [
-            {"name": "Fruits & Vegetables", "url": "https://www.zepto.com/cn/fruits-vegetables/fruits-vegetables/cid/64374cfe-d06f-4a01-898e-c07c46462c36/scid/e78a8422-5f20-4e4b-9a9f-22a0e53962e3"}
-        ]
-        print(f"🧪 Testing with single category: {categories[0]['name']}")
+        # Load categories from external JSON file
+        try:
+            with open('categories_test.json', 'r') as f:
+                categories = json.load(f)
+        except FileNotFoundError:
+            print("❌ categories_test.json not found. Please create the file.")
+            return []
+        except json.JSONDecodeError:
+            print("❌ Error parsing categories_test.json. Please check the format.")
+            return []
         
         # Create necessary directories
         Path("data").mkdir(exist_ok=True)
@@ -386,6 +394,68 @@ class ZeptoPriceTrackerWithComparison:
         major_drops.sort(key=lambda x: abs(x['pct_change']), reverse=True)
         return major_drops
     
+    def send_slack_alert(self, drops: List[Dict]):
+        """Send Slack alert for major price drops"""
+        if not drops or not self.slack_webhook_url:
+            return
+
+        message_blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"📉 Major Price Drops Detected (≥ {self.price_drop_threshold}%)",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "divider"
+            }
+        ]
+
+        for drop in drops[:10]:  # Limit to top 10 to avoid hitting message size limits
+            old_price = drop['old_price']
+            new_price = drop['price']
+            change = drop['pct_change']
+            name = drop['name']
+            url = drop.get('url', 'N/A')
+            
+            # Get additional product info
+            product_info = self.get_product_by_hash(drop['hash'])
+            category = product_info['category'] if product_info else "Unknown"
+
+            product_section = {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*<{url}|{name}>*\nCategory: {category}\n*₹{old_price:.2f}* → *₹{new_price:.2f}* ({change:+.1f}%)"
+                }
+            }
+            message_blocks.append(product_section)
+            message_blocks.append({"type": "divider"})
+
+        if len(drops) > 10:
+            message_blocks.append({
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"...and {len(drops) - 10} more products."
+                    }
+                ]
+            })
+
+        payload = {"blocks": message_blocks}
+        
+        try:
+            response = requests.post(self.slack_webhook_url, json=payload)
+            if response.status_code == 200:
+                print(ctext("✅ Slack alert sent successfully!", Color.GREEN))
+            else:
+                print(ctext(f"❌ Failed to send Slack alert: {response.status_code} - {response.text}", Color.RED))
+        except Exception as e:
+            print(ctext(f"❌ Error sending Slack alert: {e}", Color.RED))
+
     def _report_price_drops(self, drops: List[Dict]):
         """Report major price drops with colorized output"""
         print("\n" + "=" * 60)
@@ -426,6 +496,10 @@ class ZeptoPriceTrackerWithComparison:
                 
                 # Add separator between products
                 print()
+        
+        # Send Slack alert
+        if drops:
+            self.send_slack_alert(drops)
     
     async def _set_location(self, page):
         """Set delivery location"""
@@ -447,7 +521,7 @@ class ZeptoPriceTrackerWithComparison:
         
         prev_count = 0
         stable_rounds = 0
-        max_scrolls = 100  # High limit for testing
+        max_scrolls = 100  # Increased limit for infinite scroll
         price_elements = page.locator('text=/₹[0-9]/')
         
         current_count = await price_elements.count()
@@ -678,7 +752,7 @@ class ZeptoPriceTrackerWithComparison:
         seen = set()
         unique = []
         
-        print(f"    🔍 Checking for duplicates among {len(products)} extracted items...")
+        # print(f"    🔍 Checking for duplicates among {len(products)} extracted items...")
         
         for prod in products:
             # Normalize name by removing extra spaces
@@ -688,27 +762,17 @@ class ZeptoPriceTrackerWithComparison:
                 seen.add(normalized_name)
                 unique.append(prod)
             else:
-                # Log the duplicate for verification
-                print(f"      ⚠️  Duplicate found (skipping): {prod.name[:50]}...")
+                # Log the duplicate for verification (optional, can be noisy)
+                # print(f"      ⚠️  Duplicate found (skipping): {prod.name[:50]}...")
+                pass
         
         return unique
 
 
 async def main():
-    """Main function with command line arguments"""
-    parser = argparse.ArgumentParser(description='Zepto Price Tracker with Price Comparison')
-    parser.add_argument('--threshold', type=float, default=20.0,
-                        help='Price drop threshold percentage (default: 20.0)')
-    parser.add_argument('--location', type=str, default='Arcade Gloria',
-                        help='Location PIN code (default: Arcade Gloria)')
-    
-    args = parser.parse_args()
-    
-    # Create tracker and run
-    tracker = ZeptoPriceTrackerWithComparison(
-        location_pin=args.location,
-        price_drop_threshold=args.threshold
-    )
+    """Main function"""
+    # Create tracker and run with hardcoded defaults
+    tracker = ZeptoPriceTrackerWithComparison()
     
     await tracker.scrape_all_categories()
 

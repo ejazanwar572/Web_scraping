@@ -444,21 +444,21 @@ class ZeptoPriceTrackerWithComparison:
             pass
     
     async def _wait_for_products(self, page):
-        """Wait and scroll for products to load - simple bottom scrolling"""
-        print("    🔄 Waiting for products to load...")
+        """Wait and scroll for products to load - Infinite Scroll Implementation"""
+        print("    🔄 Starting infinite scroll...")
         
-        # Initial wait for first load
+        # Initial wait
         await asyncio.sleep(3)
         
-        # Get initial count
         prev_count = 0
         stable_rounds = 0
+        max_scrolls = 100  # Increased limit for infinite scroll
         price_elements = page.locator('text=/₹[0-9]/')
+        
         current_count = await price_elements.count()
         print(f"    📦 Initial products: {current_count}")
         
-        # Scroll to bottom 5 times with waits
-        for scroll_num in range(9):
+        for scroll_num in range(max_scrolls):
             # Scroll to bottom
             await page.evaluate("window.scrollBy(0, Math.floor(window.innerHeight * 0.9));")
             await asyncio.sleep(1.5)  # Wait for content to load
@@ -472,9 +472,12 @@ class ZeptoPriceTrackerWithComparison:
                 stable_rounds = 0
             else:
                 stable_rounds += 1
-                print(f"    ⏳ No new products (stable rounds: {stable_rounds})")
-            if stable_rounds >= 3:
-                break            
+                # print(f"    ⏳ No new products (stable rounds: {stable_rounds})")
+            
+            # Exit if stable for too long
+            if stable_rounds >= 5:
+                print(f"    🛑 Product count stable for {stable_rounds} rounds. Stopping.")
+                break
         
         # Final count
         final_count = await price_elements.count()
@@ -680,6 +683,8 @@ class ZeptoPriceTrackerWithComparison:
         seen = set()
         unique = []
         
+        # print(f"    🔍 Checking for duplicates among {len(products)} extracted items...")
+        
         for prod in products:
             # Normalize name by removing extra spaces
             normalized_name = ' '.join(prod.name.split()).lower()
@@ -687,6 +692,10 @@ class ZeptoPriceTrackerWithComparison:
             if normalized_name not in seen:
                 seen.add(normalized_name)
                 unique.append(prod)
+            else:
+                # Log the duplicate for verification (optional, can be noisy)
+                # print(f"      ⚠️  Duplicate found (skipping): {prod.name[:50]}...")
+                pass
         
         return unique
 
