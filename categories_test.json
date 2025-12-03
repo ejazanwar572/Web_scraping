@@ -1,13 +1,5 @@
 [
     {
-        "name": "Fruits & Vegetables",
-        "url": "https://www.zepto.com/cn/fruits-vegetables/fruits-vegetables/cid/64374cfe-d06f-4a01-898e-c07c46462c36/scid/e78a8422-5f20-4e4b-9a9f-22a0e53962e3"
-    },
-    {
-        "name": "Pet Care",
-        "url": "https://www.zepto.com/search?query=Pet+care"
-    },
-    {
         "name": "Electronics",
         "url": "https://www.zepto.com/search?query=electronics"
     },
@@ -22,5 +14,9 @@
     {
         "name": "Bath & Body",
         "url": "https://www.zepto.com/cn/bath-body/top-deals/cid/26e64367-19ad-4f80-a763-42599d4215ee/scid/b493b1f8-c617-45e6-8a73-95239637bd5c"
+    },
+    {
+        "name": "Zepto snacks",
+        "url": "https://www.zepto.com/uncl/snack-time/59a487bc-73a9-43f0-b3f2-03ee94feef03?scid=59a487bc-73a9-43f0-b3f2-03ee94feef03&columns=1&cardType=V1_LARGE&hidePassStrip=true"
     }
 ]
